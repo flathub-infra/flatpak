@@ -35,6 +35,8 @@
 
 #define FLATPAK_RUN_APP_DEPLOY_USR_ORIGINAL (-2)
 
+gboolean is_unpriv_container(void);
+
 gboolean flatpak_run_in_transient_unit (const char *app_id,
                                         const char *instance_id,
                                         GError    **error);

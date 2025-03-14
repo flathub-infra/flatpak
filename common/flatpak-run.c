@@ -86,6 +86,73 @@ flatpak_extension_compare_by_path (gconstpointer _a,
   return g_strcmp0 (a->directory, b->directory);
 }
 
+gboolean
+is_unpriv_container(void) {
+    gboolean map_unpriv = FALSE;
+    gboolean can_write = TRUE;
+    gboolean no_caps = FALSE;
+
+    const gchar *id_maps[] = {"/proc/self/uid_map", "/proc/self/gid_map"};
+    for (guint i = 0; i < G_N_ELEMENTS(id_maps); i++) {
+        gchar *contents = NULL;
+        gsize len;
+
+        if (!g_file_get_contents(id_maps[i], &contents, &len, NULL))
+            continue;
+
+        gchar **lines = g_strsplit(contents, "\n", -1);
+        guint count = g_strv_length(lines);
+
+        if (count > 1) {
+            map_unpriv = TRUE;
+        } else {
+            for (guint j = 0; lines[j] != NULL && lines[j][0] != '\0'; j++) {
+                gulong in_id, out_id, range;
+                if (sscanf(lines[j], "%lu %lu %lu", &in_id, &out_id, &range) == 3) {
+                    if (out_id != 0 || !(in_id == 0 && range >= G_MAXUINT32)) {
+                        map_unpriv = TRUE;
+                    }
+                }
+            }
+        }
+        g_strfreev(lines);
+        g_free(contents);
+    }
+
+    gint fd = open("/proc/sys/user/max_user_namespaces", O_WRONLY);
+    if (fd < 0) {
+        can_write = FALSE;
+    } else {
+        close(fd);
+    }
+
+    gchar *contents = NULL;
+    gsize len;
+
+    if (g_file_get_contents("/proc/self/status", &contents, &len, NULL)) {
+        const gchar *caps[] = {"CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"};
+        gboolean cap_zero = TRUE;
+        gchar **lines = g_strsplit(contents, "\n", -1);
+
+        for (guint i = 0; lines[i] != NULL && cap_zero; i++) {
+            for (guint j = 0; j < G_N_ELEMENTS(caps); j++) {
+                if (g_str_has_prefix(lines[i], caps[j])) {
+                    gchar *cap_val = g_strstrip(g_strdup(lines[i] + strlen(caps[j])));
+                    if (cap_val != NULL && g_strcmp0(cap_val, "0000000000000000") != 0) {
+                        cap_zero = FALSE;
+                    }
+                    g_free(cap_val);
+                    break;
+                }
+            }
+        }
+        no_caps = cap_zero;
+        g_strfreev(lines);
+        g_free(contents);
+    }
+    return (map_unpriv && no_caps && !can_write);
+}
+
 void
 flatpak_run_extend_ld_path (FlatpakBwrap *bwrap,
                             const char *prepend,
@@ -2274,23 +2341,26 @@ flatpak_run_setup_base_argv (FlatpakBwrap   *bwrap,
    * If bwrap is setuid, then --disable-userns will not work, which
    * makes the seccomp filter security-critical.
    */
-  if (bwrap_unprivileged)
-    {
-      if (parent_expose_pids || parent_share_pids)
-        {
-          /* If we're joining an existing sandbox's user and process
-           * namespaces, then it should already have creation of
-           * nested user namespaces disabled. */
-          flatpak_bwrap_add_arg (bwrap, "--assert-userns-disabled");
-        }
-      else
-        {
-          /* This is a new sandbox, so we need to disable creation of
-           * nested user namespaces. */
-          flatpak_bwrap_add_arg (bwrap, "--unshare-user");
-          flatpak_bwrap_add_arg (bwrap, "--disable-userns");
-        }
-    }
+  if (!is_unpriv_container())
+  {
+      if (bwrap_unprivileged)
+      {
+          if (parent_expose_pids || parent_share_pids)
+          {
+              /* If we're joining an existing sandbox's user and process
+               * namespaces, then it should already have creation of
+               * nested user namespaces disabled. */
+              flatpak_bwrap_add_arg (bwrap, "--assert-userns-disabled");
+          }
+          else
+          {
+              /* This is a new sandbox, so we need to disable creation of
+               * nested user namespaces. */
+              flatpak_bwrap_add_arg (bwrap, "--unshare-user");
+              flatpak_bwrap_add_arg (bwrap, "--disable-userns");
+          }
+      }
+  }
 
   run_dir = g_strdup_printf ("/run/user/%d", getuid ());
 
