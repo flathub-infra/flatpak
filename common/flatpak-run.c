@@ -97,6 +97,81 @@ flatpak_extension_compare_by_path (gconstpointer _a,
   return g_strcmp0 (a->directory, b->directory);
 }
 
+static gboolean
+is_unpriv_container (void)
+{
+  static const char * const id_maps[] = {
+    "/proc/self/uid_map",
+    "/proc/self/gid_map",
+  };
+  static const char * const cap_fields[] = {
+    "CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:",
+  };
+  gboolean map_unpriv = FALSE;
+  gboolean no_caps = TRUE;
+  glnx_autofd int fd = -1;
+
+  for (size_t i = 0; i < G_N_ELEMENTS (id_maps); i++)
+    {
+      g_autofree char *contents = NULL;
+      g_auto(GStrv) lines = NULL;
+      gsize len;
+
+      if (!g_file_get_contents (id_maps[i], &contents, &len, NULL))
+        continue;
+
+      lines = g_strsplit (contents, "\n", -1);
+
+      if (g_strv_length (lines) > 1)
+        {
+          map_unpriv = TRUE;
+          continue;
+        }
+
+      for (size_t j = 0; lines[j] != NULL && lines[j][0] != '\0'; j++)
+        {
+          gulong in_id, out_id, range;
+
+          if (sscanf (lines[j], "%lu %lu %lu", &in_id, &out_id, &range) != 3)
+            continue;
+
+          if (out_id != 0 || !(in_id == 0 && range >= G_MAXUINT32))
+            map_unpriv = TRUE;
+        }
+    }
+
+  {
+    g_autofree char *contents = NULL;
+    g_auto(GStrv) lines = NULL;
+    gsize len;
+
+    if (g_file_get_contents ("/proc/self/status", &contents, &len, NULL))
+      {
+        lines = g_strsplit (contents, "\n", -1);
+
+        for (size_t i = 0; lines[i] != NULL && no_caps; i++)
+          {
+            for (size_t j = 0; j < G_N_ELEMENTS (cap_fields); j++)
+              {
+                if (!g_str_has_prefix (lines[i], cap_fields[j]))
+                  continue;
+
+                g_autofree char *val = g_strstrip (g_strdup (lines[i] + strlen (cap_fields[j])));
+
+                if (g_strcmp0 (val, "0000000000000000") != 0)
+                  no_caps = FALSE;
+
+                break;
+              }
+          }
+      }
+  }
+
+  fd = open ("/proc/sys/user/max_user_namespaces", O_WRONLY);
+
+  return map_unpriv && no_caps && fd < 0;
+}
+
 void
 flatpak_run_extend_ld_path (FlatpakBwrap *bwrap,
                             const char *prepend,
@@ -2359,7 +2434,7 @@ flatpak_run_setup_base_argv (FlatpakBwrap   *bwrap,
    * If bwrap is setuid, then --disable-userns will not work, which
    * makes the seccomp filter security-critical.
    */
-  if (bwrap_unprivileged)
+  if (bwrap_unprivileged && !is_unpriv_container ())
     {
       if (parent_expose_pids || parent_share_pids)
         {

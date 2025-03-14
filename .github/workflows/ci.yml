@@ -108,3 +108,7 @@ jobs:
         name: test-logs-${{ github.run_id }}-${{ github.run_attempt }}
         path: test-logs
         overwrite: true
+
+    - name: Run the unpriv test
+      run: |
+        ./tests/run_docker_test.sh
