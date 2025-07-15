@@ -2762,6 +2762,62 @@ flatpak_context_make_sandboxed (FlatpakContext *context)
   g_hash_table_remove_all (context->generic_policy);
 }
 
+void
+flatpak_context_reset_runtime_permissions (FlatpakContext *context, const char *runtime_name)
+{
+  const char *allowed_filesystems[] = {
+    "xdg-config/kdeglobals",
+    NULL
+  };
+
+  typedef struct {
+    const char *name;
+    FlatpakPolicy policy;
+  } AllowedSessionBus;
+
+  const AllowedSessionBus allowed_session_buses[] = {
+    {"com.canonical.AppMenu.Registrar", FLATPAK_POLICY_TALK},
+    {"org.kde.kconfig.notify", FLATPAK_POLICY_TALK},
+    {"org.kde.KGlobalSettings", FLATPAK_POLICY_TALK},
+    {"org.kde.kdeconnect", FLATPAK_POLICY_TALK},
+    {NULL, FLATPAK_POLICY_NONE}
+  };
+
+  context->shares_valid = 0;
+  context->sockets_valid = 0;
+  context->devices_valid = 0;
+  context->features_valid = 0;
+  context->shares = 0;
+  context->sockets = 0;
+  context->devices = 0;
+  context->features = 0;
+  g_hash_table_remove_all (context->persistent);
+  g_hash_table_remove_all (context->filesystems);
+  g_hash_table_remove_all (context->session_bus_policy);
+  g_hash_table_remove_all (context->system_bus_policy);
+  g_hash_table_remove_all (context->a11y_bus_policy);
+  g_hash_table_remove_all (context->generic_policy);
+
+  if (runtime_name != NULL &&
+      (g_strcmp0 (runtime_name, "org.kde.Platform") == 0 ||
+       g_strcmp0 (runtime_name, "org.kde.Sdk") == 0))
+    {
+      for (int i = 0; allowed_filesystems[i] != NULL; i++)
+        {
+          g_hash_table_insert (context->filesystems,
+                               g_strdup (allowed_filesystems[i]),
+                               GINT_TO_POINTER (FLATPAK_FILESYSTEM_MODE_READ_ONLY));
+        }
+
+      for (int i = 0; allowed_session_buses[i].name != NULL; i++)
+        {
+          g_hash_table_insert (context->session_bus_policy,
+                               g_strdup (allowed_session_buses[i].name),
+                               GINT_TO_POINTER (allowed_session_buses[i].policy));
+        }
+    }
+}
+
 const char *dont_mount_in_root[] = {
   ".",
   "..",
