@@ -162,6 +162,8 @@ gboolean       flatpak_context_adds_permissions (FlatpakContext *old_context,
 
 void           flatpak_context_reset_permissions (FlatpakContext *context);
 void           flatpak_context_reset_non_permissions (FlatpakContext *context);
+void           flatpak_context_reset_runtime_permissions (FlatpakContext *context,
+                                                          const char     *runtime_dref);
 void           flatpak_context_make_sandboxed (FlatpakContext *context);
 
 FlatpakContext *flatpak_context_load_for_deploy (FlatpakDeploy *deploy,

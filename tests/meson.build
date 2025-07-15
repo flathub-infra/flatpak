@@ -412,6 +412,7 @@ tests = {
   'preinstall': {},
   'run-custom': {'wrap': ['user', 'system']},
   'upgrade-from-header': {'wrap': ['user', 'system', 'system-norevokefs']},
+  'runtime-permission-strip': {},
 }
 
 wrapped_tests = []
