@@ -479,7 +479,8 @@ update_metadata (GFile *base, FlatpakContext *arg_context, gboolean is_runtime, 
               g_autofree char *runtime_metadata_contents = NULL;
               gsize runtime_metadata_size;
               g_autoptr(GKeyFile) runtime_metakey = NULL;
-              g_autofree char *runtime_name = NULL;
+              g_autofree char *runtime_fref = NULL;
+              g_autofree char *runtime_dref = NULL;
 
               runtime_metadata_file = g_file_get_child (runtime_deploy_dir, "metadata");
               if (!g_file_load_contents (runtime_metadata_file, cancellable,
@@ -490,7 +491,19 @@ update_metadata (GFile *base, FlatpakContext *arg_context, gboolean is_runtime, 
               if (!g_key_file_load_from_data (runtime_metakey, runtime_metadata_contents, runtime_metadata_size, 0, error))
                 goto out;
 
-              runtime_name = g_key_file_get_string (runtime_metakey, FLATPAK_METADATA_GROUP_RUNTIME, FLATPAK_METADATA_KEY_NAME, NULL);
+              runtime_fref = g_key_file_get_string (runtime_metakey, FLATPAK_METADATA_GROUP_RUNTIME, FLATPAK_METADATA_KEY_RUNTIME, NULL);
+              if (runtime_fref == NULL)
+                runtime_fref = g_key_file_get_string (runtime_metakey, FLATPAK_METADATA_GROUP_RUNTIME, FLATPAK_METADATA_KEY_SDK, NULL);
+
+              if (runtime_fref == NULL)
+                goto out;
+
+              g_auto(GStrv) parts = g_strsplit (runtime_fref, "/", 3);
+              if (parts[0] != NULL && parts[1] != NULL && parts[2] != NULL)
+                runtime_dref = g_strdup_printf ("%s//%s", parts[0], parts[2]);
+
+              if (runtime_dref == NULL)
+                goto out;
 
               inherited_context = flatpak_context_new ();
               if (!flatpak_context_load_metadata (inherited_context, runtime_metakey, error))
@@ -498,7 +511,7 @@ update_metadata (GFile *base, FlatpakContext *arg_context, gboolean is_runtime, 
 
               /* non-permissions are inherited at runtime, so no need to inherit them */
               flatpak_context_reset_non_permissions (inherited_context);
-              flatpak_context_reset_runtime_permissions (inherited_context, runtime_name);
+              flatpak_context_reset_runtime_permissions (inherited_context, runtime_dref);
             }
         }
     }

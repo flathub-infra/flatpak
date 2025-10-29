@@ -2763,7 +2763,7 @@ flatpak_context_make_sandboxed (FlatpakContext *context)
 }
 
 void
-flatpak_context_reset_runtime_permissions (FlatpakContext *context, const char *runtime_name)
+flatpak_context_reset_runtime_permissions (FlatpakContext *context, const char *runtime_dref)
 {
   const char *allowed_filesystems[] = {
     "xdg-config/kdeglobals",
@@ -2779,7 +2779,6 @@ flatpak_context_reset_runtime_permissions (FlatpakContext *context, const char *
     {"com.canonical.AppMenu.Registrar", FLATPAK_POLICY_TALK},
     {"org.kde.kconfig.notify", FLATPAK_POLICY_TALK},
     {"org.kde.KGlobalSettings", FLATPAK_POLICY_TALK},
-    {"org.kde.kdeconnect", FLATPAK_POLICY_TALK},
     {NULL, FLATPAK_POLICY_NONE}
   };
 
@@ -2798,22 +2797,35 @@ flatpak_context_reset_runtime_permissions (FlatpakContext *context, const char *
   g_hash_table_remove_all (context->a11y_bus_policy);
   g_hash_table_remove_all (context->generic_policy);
 
-  if (runtime_name != NULL &&
-      (g_strcmp0 (runtime_name, "org.kde.Platform") == 0 ||
-       g_strcmp0 (runtime_name, "org.kde.Sdk") == 0))
+  if (runtime_dref != NULL)
     {
-      for (int i = 0; allowed_filesystems[i] != NULL; i++)
-        {
-          g_hash_table_insert (context->filesystems,
-                               g_strdup (allowed_filesystems[i]),
-                               GINT_TO_POINTER (FLATPAK_FILESYSTEM_MODE_READ_ONLY));
-        }
+      g_auto(GStrv) parts = g_strsplit (runtime_dref, "//", 2);
 
-      for (int i = 0; allowed_session_buses[i].name != NULL; i++)
+      if (parts[0] != NULL && parts[1] != NULL &&
+          (g_strcmp0 (parts[0], "org.kde.Platform") == 0 ||
+           g_strcmp0 (parts[0], "org.kde.Sdk") == 0))
         {
-          g_hash_table_insert (context->session_bus_policy,
-                               g_strdup (allowed_session_buses[i].name),
-                               GINT_TO_POINTER (allowed_session_buses[i].policy));
+          for (int i = 0; allowed_filesystems[i] != NULL; i++)
+            {
+              g_hash_table_insert (context->filesystems,
+                                   g_strdup (allowed_filesystems[i]),
+                                   GINT_TO_POINTER (FLATPAK_FILESYSTEM_MODE_READ_ONLY));
+            }
+
+          for (int i = 0; allowed_session_buses[i].name != NULL; i++)
+            {
+              g_hash_table_insert (context->session_bus_policy,
+                                   g_strdup (allowed_session_buses[i].name),
+                                   GINT_TO_POINTER (allowed_session_buses[i].policy));
+            }
+
+          if (g_strcmp0 (parts[1], "6.8") == 0 ||
+              g_strcmp0 (parts[1], "6.9") == 0)
+            {
+              g_hash_table_insert (context->session_bus_policy,
+                                   g_strdup ("org.kde.kdeconnect"),
+                                   GINT_TO_POINTER (FLATPAK_POLICY_TALK));
+            }
         }
     }
 }
