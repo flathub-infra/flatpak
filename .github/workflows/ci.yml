@@ -1,0 +1,110 @@
+name: Flatpak CI
+
+on:
+  push:
+    branches:
+    - 'flathub-flatpak-*'
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  MESON_TEST_TIMEOUT_MULTIPLIER: 5
+
+jobs:
+  check:
+    name: Build with gcc and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      matrix:
+        compiler: ['gcc']
+
+    env:
+      CC: ${{ matrix.compiler }}
+      BUILDDIR: builddir
+      CONFIG_OPTS: >-
+        --prefix=/app
+        --libdir=lib
+
+        -Dgir=disabled
+        -Dgtkdoc=disabled
+        -Ddocbook_docs=disabled
+        -Dman=disabled
+        -Dmalcontent=disabled
+        -Dseccomp=disabled
+        -Dsystem_helper=disabled
+        -Dselinux_module=disabled
+        -Dwayland_security_context=disabled
+        -Dsandboxed_triggers=false
+
+        -Dinternal_checks=true
+        -Dinternal_tests=true
+        -Dtests=true
+
+        -Dsystem_dbus_proxy=xdg-dbus-proxy
+        -Dsystem_install_dir=/var/lib/flatpak
+
+    steps:
+    - name: Perform workarounds
+      run: |
+        head -v -n-0 /etc/apt/sources.list || :
+        head -v -n-0 /etc/apt/sources.list.d/* || :
+        sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+        sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        sudo systemctl reload apparmor
+        sudo mkdir /tmp/flatpak-com.example.App-OwnedByRoot
+        mkdir test-logs
+
+    - name: Install pre-dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git findutils
+
+    - name: Check out repository
+      # 6.0.2
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        submodules: true
+
+    - name: Set git safe directory
+      run: |
+        git config --global safe.directory "*"
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get install -y ${{ matrix.compiler }} \
+        $(xargs < .github/dependencies.apt.txt)
+
+    - name: Configure flatpak
+      run: |
+        meson setup ${CONFIG_OPTS} \
+          -Db_sanitize=address,undefined \
+          ${BUILDDIR} .
+
+    - name: Build flatpak
+      run: |
+        meson compile -C ${BUILDDIR}
+
+    - name: Run tests
+      env:
+        ASAN_OPTIONS: detect_leaks=0
+        LC_ALL: en_US.UTF-8
+      run: |
+        meson test -C ${BUILDDIR} --verbose --timeout-multiplier ${MESON_TEST_TIMEOUT_MULTIPLIER}
+
+    - name: Collect logs
+      if: always()
+      run: |
+        mv -vf ${BUILDDIR}/meson-logs/* test-logs/ || true
+
+    - name: Upload logs
+      if: always()
+      # 7.0.0
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+      with:
+        name: test-logs-${{ github.run_id }}-${{ github.run_attempt }}
+        path: test-logs
+        overwrite: true
